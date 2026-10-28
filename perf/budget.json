@@ -1,0 +1,7 @@
+{
+  "frame_ms": 16.6,
+  "p99_frame_ms": 20.0,
+  "draw_calls": 2000,
+  "triangles": 5000000,
+  "vram_mb": 4096
+}

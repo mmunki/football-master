@@ -1,0 +1,184 @@
+name: build
+
+# Builds the game with a hard 5h50m cap.
+#
+# GitHub kills a job at 6h.  This workflow stops the build itself at 5h30m
+# (timeout_seconds), writes a checkpoint, uploads it, and dispatches the next
+# run.  The next run restores the checkpoint (sources, import cache, build
+# output), cancels the run that handed off, and continues the build.
+#
+# The build command must be resumable: make/ninja/SCons already are, and the
+# checkpoint keeps .godot, build/ and .cache/godot between attempts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "game build or the continuation self-test"
+        type: choice
+        options: [game, selftest]
+        default: game
+      build_cmd:
+        description: "build command (empty = bash tools/build.sh)"
+        type: string
+        default: ""
+      timeout_seconds:
+        description: "hand off after N seconds (5h30m = 19800)"
+        type: string
+        default: "19800"
+      attempt:
+        description: "internal: attempt number"
+        type: string
+        default: "1"
+      max_attempts:
+        description: "internal: maximum attempts"
+        type: string
+        default: "12"
+      previous_run:
+        description: "internal: run id that handed off"
+        type: string
+        default: ""
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: long-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      GH_TOKEN: ${{ secrets.OPENCODE_GITHUB_TOKEN || github.token }}
+      MODE: ${{ inputs.mode || 'game' }}
+      BUILD_CMD: ${{ inputs.build_cmd || 'bash tools/build.sh' }}
+      TIMEOUT_SECONDS: ${{ inputs.timeout_seconds || '19800' }}
+      ATTEMPT: ${{ inputs.attempt || '1' }}
+      MAX_ATTEMPTS: ${{ inputs.max_attempts || '12' }}
+      PREVIOUS_RUN: ${{ inputs.previous_run || '' }}
+    steps:
+      - name: Check out the project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.OPENCODE_GITHUB_TOKEN || github.token }}
+
+      - name: Take over from the previous run
+        if: env.PREVIOUS_RUN != ''
+        run: |
+          set -euo pipefail
+          if [ "$PREVIOUS_RUN" != "$GITHUB_RUN_ID" ]; then
+            echo "cancelling run $PREVIOUS_RUN (it handed off)"
+            gh run cancel "$PREVIOUS_RUN" --repo "$GITHUB_REPOSITORY" || true
+          fi
+
+      - name: Restore the checkpoint
+        if: env.PREVIOUS_RUN != ''
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/build-state
+          gh run download "$PREVIOUS_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "build-state-$PREVIOUS_RUN" --dir /tmp/build-state
+          tar -xzf /tmp/build-state/build-state.tar.gz -C "$GITHUB_WORKSPACE"
+          echo "restored the checkpoint from run $PREVIOUS_RUN"
+          du -sh .godot build .cache 2>/dev/null || true
+
+      - name: Install Godot
+        if: env.MODE == 'game'
+        run: |
+          set -euo pipefail
+          godot="$(bash tools/fetch_godot.sh | tail -1)"
+          echo "GODOT=$godot" >> "$GITHUB_ENV"
+          "$godot" --version
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          echo "attempt $ATTEMPT/$MAX_ATTEMPTS"
+          echo "hand off after ${TIMEOUT_SECONDS}s: $BUILD_CMD"
+          set +e
+          timeout --signal=TERM --kill-after=60 "$TIMEOUT_SECONDS" \
+            bash -lc "$BUILD_CMD" 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "BUILD_STATUS=$status" >> "$GITHUB_ENV"
+          echo "build exited with status $status"
+          if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
+            exit "$status"
+          fi
+
+      - name: Validate assets and performance budget
+        if: env.MODE == 'game' && env.BUILD_STATUS == '0'
+        run: |
+          set -euo pipefail
+          python3 tools/validate_assets.py --strict
+          python3 tools/perf_budget.py
+
+      - name: Keep the build output
+        if: always() && hashFiles('build/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-build-${{ github.run_id }}
+          path: build/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Write the checkpoint
+        if: env.BUILD_STATUS == '124'
+        run: |
+          set -euo pipefail
+          # Write outside the workspace: a tarball inside the directory it
+          # archives makes GNU tar report "file changed as we read it".
+          tar --exclude=.git \
+            -czf "$RUNNER_TEMP/build-state.tar.gz" .
+          ls -lh "$RUNNER_TEMP/build-state.tar.gz"
+
+      - name: Upload the checkpoint
+        if: env.BUILD_STATUS == '124'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-state-${{ github.run_id }}
+          path: ${{ runner.temp }}/build-state.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Dispatch the continuation
+        if: env.BUILD_STATUS == '124'
+        run: |
+          set -euo pipefail
+          next=$((ATTEMPT + 1))
+          if [ "$next" -gt "$MAX_ATTEMPTS" ]; then
+            echo "::error::build did not finish after $MAX_ATTEMPTS attempts"
+            exit 1
+          fi
+          gh workflow run build.yml --repo "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME" \
+            -f mode="$MODE" \
+            -f build_cmd="$BUILD_CMD" \
+            -f timeout_seconds="$TIMEOUT_SECONDS" \
+            -f attempt="$next" \
+            -f max_attempts="$MAX_ATTEMPTS" \
+            -f previous_run="$GITHUB_RUN_ID"
+          echo "dispatched attempt $next from run $GITHUB_RUN_ID"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Football Master build"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| run | $GITHUB_RUN_ID |"
+            echo "| attempt | $ATTEMPT / $MAX_ATTEMPTS |"
+            echo "| mode | $MODE |"
+            echo "| build status | ${BUILD_STATUS:-unknown} |"
+            echo "| handoff timeout | ${TIMEOUT_SECONDS}s |"
+            echo "| job cap | 350 min (GitHub limit 360) |"
+          } >> "$GITHUB_STEP_SUMMARY"

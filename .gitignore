@@ -1,0 +1,7 @@
+.godot/
+build/
+.cache/
+*.tmp
+*.log
+perf/report.json
+*.import
