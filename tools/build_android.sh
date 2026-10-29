@@ -3,8 +3,10 @@
 #
 # The APK is built for Android 7.0+ (minSdk 24) and targets Android 16
 # (API 36), with the 16 KB page-size layout required by newer Android
-# devices.  Only the arm64-v8a ABI is packaged: there is no armeabi-v7a,
-# x86 or x86_64 library in the APK.
+# devices.  It is a *universal* APK: it carries the arm64-v8a, armeabi-v7a
+# and x86_64 Godot libraries, so the same file installs on 64-bit phones,
+# 32-bit phones and x86_64 tablets/emulators.  The dead 32-bit x86 ABI is
+# the only one that is not packaged.
 #
 # Release builds are signed with a real keystore and verified with
 # apksigner (APK Signature Scheme v1, v2 and v3):
@@ -24,6 +26,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+# The ABIs that every published APK must contain, and the ones that must
+# never appear.  A device whose ABI is missing rejects the APK with
+# INSTALL_FAILED_NO_MATCHING_ABIS ("App not installed"), which is exactly
+# what an arm64-only build did on 32-bit phones and x86_64 emulators.
+REQUIRED_ABIS="arm64-v8a armeabi-v7a x86_64"
+FORBIDDEN_ABIS="x86 mips mips64 riscv64"
 
 if [ -z "${GODOT:-}" ]; then
   GODOT="$(bash tools/fetch_godot.sh | tail -1)"
@@ -121,10 +130,10 @@ echo "==> importing resources"
 apk="build/android/football-master.apk"
 rm -f "$apk" "$apk.idsig" build/android/football-master-certificate.pem
 if [ "$mode" = "release" ]; then
-  echo "==> exporting Android (release, arm64-v8a)"
+  echo "==> exporting Android (release, universal: $REQUIRED_ABIS)"
   "$GODOT" --headless --path . --export-release "Android" "$apk"
 else
-  echo "==> exporting Android (debug, arm64-v8a)"
+  echo "==> exporting Android (debug, universal: $REQUIRED_ABIS)"
   "$GODOT" --headless --path . --export-debug "Android" "$apk"
 fi
 
@@ -162,9 +171,11 @@ fi
 echo "==> validating $apk"
 # aapt 36 prints a benign warning about the template manifest and exits
 # non-zero, so the exit status is ignored and the output is what is checked.
+# aapt v1 is used for the SDK levels; aapt2 prints those differently but the
+# ABI list is read from the zip below, so both tools agree on what matters.
 badging="$("$build_tools/aapt" dump badging "$apk" 2>/dev/null || true)"
 [ -n "$badging" ] || die "aapt could not read the APK"
-printf '%s\n' "$badging" | grep -E '^(package|sdkVersion|targetSdkVersion|native-code)'
+printf '%s\n' "$badging" | grep -E '^(package|sdkVersion|targetSdkVersion|native-code)' || true
 printf '%s\n' "$badging" | grep -q "package: name='com.mmunki.footballmaster'" \
   || die "the APK has an unexpected package name"
 
@@ -173,18 +184,35 @@ target_sdk="$(printf '%s\n' "$badging" | sed -n "s/^targetSdkVersion:'\([0-9][0-
 [ "$min_sdk" = "24" ] || die "expected minSdk 24 (Android 7.0), got: ${min_sdk:-unknown}"
 [ "$target_sdk" = "36" ] || die "expected targetSdk 36 (Android 16), got: ${target_sdk:-unknown}"
 
-native_code="$(printf '%s\n' "$badging" | sed -n 's/^native-code: //p')"
-if [ -n "$native_code" ] && [ "$native_code" != "'arm64-v8a'" ]; then
-  die "expected arm64-v8a to be the only ABI, got: $native_code"
-fi
-
+# Every required ABI must be present, and no forbidden ABI may sneak in.
+# The list comes from the zip itself: aapt v1 silently omits the
+# `native-code` line of `dump badging`, so trusting it made the ABI check a
+# no-op and let an arm64-only APK pass as "universal".
 apk_entries="$(unzip -Z1 "$apk")"
-printf '%s\n' "$apk_entries" | grep -qx "lib/arm64-v8a/libgodot_android.so" \
-  || die "the APK is missing the arm64-v8a Godot library"
-if printf '%s\n' "$apk_entries" | grep -Eq '^lib/(armeabi-v7a|x86|x86_64)/'; then
-  die "the APK contains a non-arm64 ABI"
-fi
-echo "ABI ok: arm64-v8a (no other ABI)"
+apk_abis="$(printf '%s\n' "$apk_entries" | sed -n 's#^lib/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ')"
+[ -n "${apk_abis// /}" ] || die "the APK contains no native libraries"
+for abi in $REQUIRED_ABIS; do
+  case " $apk_abis " in
+    *" $abi "*) ;;
+    *) die "the APK is missing the $abi ABI (got: ${apk_abis:-none})" ;;
+  esac
+done
+for abi in $FORBIDDEN_ABIS; do
+  case " $apk_abis " in
+    *" $abi "*) die "the APK contains the unsupported $abi ABI" ;;
+  esac
+done
+echo "ABI ok: $apk_abis"
+for abi in $REQUIRED_ABIS; do
+  printf '%s\n' "$apk_entries" | grep -qx "lib/$abi/libgodot_android.so" \
+    || die "the APK is missing lib/$abi/libgodot_android.so"
+done
+for abi in $FORBIDDEN_ABIS; do
+  if printf '%s\n' "$apk_entries" | grep -Eq "^lib/$abi/"; then
+    die "the APK contains a $abi library"
+  fi
+done
+echo "libraries ok: libgodot_android.so in every ABI"
 unzip -t "$apk" >/dev/null || die "the APK zip is corrupt"
 
 # Verify every signature scheme, including the v1 JAR signature.  apksigner
