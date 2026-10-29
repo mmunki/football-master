@@ -1,0 +1,65 @@
+name: android
+
+# Builds the installable Android APK on every change that can affect it.
+# The APK is a debug-signed, universal build (arm64-v8a, armeabi-v7a and
+# x86_64) and is kept as a workflow artifact.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "project.godot"
+      - "export_presets.cfg"
+      - "icon.svg"
+      - "scenes/**"
+      - "scripts/**"
+      - "tools/**"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "project.godot"
+      - "export_presets.cfg"
+      - "icon.svg"
+      - "scenes/**"
+      - "scripts/**"
+      - "tools/**"
+      - ".github/workflows/android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the project
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install the Android build tools
+        run: sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+
+      - name: Build the APK
+        run: bash tools/build_android.sh
+
+      - name: Keep the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: football-master-android-${{ github.run_id }}
+          path: |
+            build/android/football-master.apk
+            build/SHA256SUMS
+          retention-days: 14
+          if-no-files-found: error

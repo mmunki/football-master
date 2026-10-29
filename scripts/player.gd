@@ -11,11 +11,16 @@ var facing: Vector3 = Vector3(0, 0, 1)
 var last_move_dir: Vector3 = Vector3(0, 0, 1)
 var kick_cooldown_left: float = 0.0
 
+## Filled in by the on-screen controls of the Android build.  The vector is
+## analog (length 0..1) so a half-pushed stick walks, a full one sprints.
+var touch_move: Vector2 = Vector2.ZERO
+var touch_sprint: bool = false
+
 func _physics_process(delta: float) -> void:
 	if kick_cooldown_left > 0.0:
 		kick_cooldown_left -= delta
 
-	var input_dir := Vector2.ZERO
+	var input_dir := touch_move
 	if Input.is_key_pressed(KEY_LEFT):
 		input_dir.x -= 1
 	if Input.is_key_pressed(KEY_RIGHT):
@@ -24,12 +29,12 @@ func _physics_process(delta: float) -> void:
 		input_dir.y -= 1
 	if Input.is_key_pressed(KEY_DOWN):
 		input_dir.y += 1
+	if input_dir.length() > 1.0:
+		input_dir = input_dir.normalized()
 
 	var move_dir := Vector3(input_dir.x, 0.0, input_dir.y)
-	if move_dir != Vector3.ZERO:
-		move_dir = move_dir.normalized()
 
-	var speed := sprint_speed if Input.is_key_pressed(KEY_SHIFT) else walk_speed
+	var speed := sprint_speed if (touch_sprint or Input.is_key_pressed(KEY_SHIFT)) else walk_speed
 	velocity.x = move_dir.x * speed
 	velocity.z = move_dir.z * speed
 	velocity.y -= 9.8 * get_physics_process_delta_time()
@@ -44,6 +49,10 @@ func _physics_process(delta: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_SPACE:
 		_perform_kick()
+
+## Called by the on-screen KICK button of the Android build.
+func touch_kick() -> void:
+	_perform_kick()
 
 func _perform_kick() -> void:
 	if kick_cooldown_left > 0.0:

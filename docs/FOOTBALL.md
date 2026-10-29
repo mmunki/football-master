@@ -51,4 +51,10 @@ stylized, not photoreal.
 
 - Every build runs in the checkpointed workflow: 5h30m internal timeout,
   checkpoint upload, continuation run, previous run cancelled.
-- Every release contains the game package, `SHA256SUMS`, and the source archive.
+- Every release contains the game package, the Android APK, `SHA256SUMS`, and
+  the source archive.
+- `tools/build_android.sh` exports a universal (`arm64-v8a`, `armeabi-v7a`,
+  `x86_64`) debug-signed APK; `.github/workflows/android.yml` builds and
+  verifies every ABI on each push.
+- Touch input: the Android build shows a left thumb stick (full push sprints)
+  and a KICK button; the desktop build keeps the keyboard controls.
