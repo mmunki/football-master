@@ -4,7 +4,7 @@
 # once (the cache directory is part of the build checkpoint).
 set -euo pipefail
 
-VERSION="${GODOT_VERSION:-4.4.1}"
+VERSION="${GODOT_VERSION:-4.7.2}"
 RELEASE="${VERSION}-stable"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CACHE="${GODOT_CACHE:-$ROOT/.cache/godot}"
@@ -21,7 +21,10 @@ if [ ! -x "$editor" ]; then
 fi
 
 templates="$HOME/.local/share/godot/export_templates/${VERSION}.stable"
-if [ ! -f "$templates/linux_release.x86_64" ] || [ ! -f "$templates/web_release.zip" ]; then
+if [ ! -f "$templates/linux_release.x86_64" ] \
+    || [ ! -f "$templates/web_release.zip" ] \
+    || [ ! -f "$templates/android_release.apk" ] \
+    || [ ! -f "$templates/android_debug.apk" ]; then
   echo "downloading Godot $VERSION export templates" >&2
   curl -fsSL --retry 3 -o "$CACHE/templates.tpz" \
     "https://github.com/godotengine/godot/releases/download/${RELEASE}/Godot_v${RELEASE}_export_templates.tpz"
