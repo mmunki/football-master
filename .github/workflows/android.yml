@@ -1,13 +1,14 @@
 name: android
 
 # Builds the installable Android APK on every change that can affect it.
-# The APK is a debug-signed, universal build (arm64-v8a, armeabi-v7a and
-# x86_64) and is kept as a workflow artifact.
+# The APK targets Android 16 (API 36), runs on Android 7.0+, contains only
+# the arm64-v8a ABI, is 16 KB page-size aligned and is release-signed with
+# the project keystore (APK Signature Scheme v1 + v2 + v3).
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feature/football-master-v1]
     paths:
       - "project.godot"
       - "export_presets.cfg"
@@ -29,10 +30,16 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   apk:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      GODOT_VERSION: "4.7.2"
     steps:
       - name: Check out the project
         uses: actions/checkout@v4
@@ -45,10 +52,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # The ubuntu runner image already ships the Android SDK with
-      # platform-tools and build-tools.  setup-android is not used because its
-      # post-install step still asks for the removed legacy "tools" package.
-      - name: Check the Android SDK
+      - name: Set up the Android SDK
         run: |
           set -euo pipefail
           if [ -z "${ANDROID_HOME:-}" ]; then
@@ -63,8 +67,29 @@ jobs:
           [ -d "$ANDROID_HOME/build-tools" ] || { echo "::error::Android build-tools are missing"; exit 1; }
           echo "SDK: $ANDROID_HOME"
           echo "build-tools: $(ls "$ANDROID_HOME/build-tools" | tr '\n' ' ')"
+          echo "platforms: $(ls "$ANDROID_HOME/platforms" | tr '\n' ' ')"
 
-      - name: Build the APK
+      - name: Decode the release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not configured; a release APK cannot be signed"
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/football-master-release.keystore"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+          chmod 600 "$keystore"
+          echo "keystore decoded"
+
+      - name: Build and sign the APK
+        env:
+          ANDROID_EXPORT_MODE: release
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: ${{ runner.temp }}/football-master-release.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: ${{ secrets.ANDROID_KEY_ALIAS }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
         run: bash tools/build_android.sh
 
       - name: Keep the APK
@@ -73,6 +98,22 @@ jobs:
           name: football-master-android-${{ github.run_id }}
           path: |
             build/android/football-master.apk
+            build/android/football-master-certificate.pem
             build/SHA256SUMS
           retention-days: 14
           if-no-files-found: error
+
+      - name: Summary
+        run: |
+          {
+            echo "### Football Master Android APK"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| run | $GITHUB_RUN_ID |"
+            echo "| ABI | arm64-v8a only |"
+            echo "| Android | minSdk 24, targetSdk 36 |"
+            echo "| page size | 16 KB aligned |"
+            echo "| signature | v1 + v2 + v3, release keystore |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat build/SHA256SUMS >> "$GITHUB_STEP_SUMMARY"

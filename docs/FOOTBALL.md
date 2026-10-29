@@ -11,7 +11,7 @@ original or properly licensed.
 
 ## Engine decision
 
-**Godot 4.4.1** (Track B), Forward+ for desktop, Mobile renderer for phones/Web.
+**Godot 4.7.2** (Track B), Forward+ for desktop, Mobile renderer for phones/Web.
 
 A 10–30 MB package is achievable with Godot 4 using low-poly players, one
 stadium, shared materials, compressed textures and Ogg audio — but it will look
@@ -19,7 +19,7 @@ stylized, not photoreal.
 
 ## Delivered slice (v1.0.0)
 
-- Godot 4.4.1 project (`project.godot`, Forward+).
+- Godot 4.7.2 project (`project.godot`, Forward+).
 - Main menu scene + kick-off flow.
 - Quick match scene: regulation pitch, goal frames, physics ball, striker,
   camera, stadium lighting, fog and tonemapping.
@@ -53,8 +53,9 @@ stylized, not photoreal.
   checkpoint upload, continuation run, previous run cancelled.
 - Every release contains the game package, the Android APK, `SHA256SUMS`, and
   the source archive.
-- `tools/build_android.sh` exports a universal (`arm64-v8a`, `armeabi-v7a`,
-  `x86_64`) debug-signed APK; `.github/workflows/android.yml` builds and
-  verifies every ABI on each push.
+- `tools/build_android.sh` exports an **arm64-v8a only** APK for
+  Android 7.0+ (minSdk 24), targets Android 16 (targetSdk 36), uses the
+  16 KB page-size layout and is release-signed with v1/v2/v3 signatures;
+  `.github/workflows/android.yml` builds and verifies it on each push.
 - Touch input: the Android build shows a left thumb stick (full push sprints)
   and a KICK button; the desktop build keeps the keyboard controls.
