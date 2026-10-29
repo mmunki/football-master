@@ -45,11 +45,24 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up the Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install the Android build tools
-        run: sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+      # The ubuntu runner image already ships the Android SDK with
+      # platform-tools and build-tools.  setup-android is not used because its
+      # post-install step still asks for the removed legacy "tools" package.
+      - name: Check the Android SDK
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_HOME:-}" ]; then
+            for candidate in "$HOME/Android/Sdk" /usr/local/lib/android/sdk /opt/android-sdk; do
+              if [ -d "$candidate/build-tools" ]; then
+                echo "ANDROID_HOME=$candidate" >> "$GITHUB_ENV"
+                break
+              fi
+            done
+          fi
+          [ -n "${ANDROID_HOME:-}" ] || { echo "::error::Android SDK not found"; exit 1; }
+          [ -d "$ANDROID_HOME/build-tools" ] || { echo "::error::Android build-tools are missing"; exit 1; }
+          echo "SDK: $ANDROID_HOME"
+          echo "build-tools: $(ls "$ANDROID_HOME/build-tools" | tr '\n' ' ')"
 
       - name: Build the APK
         run: bash tools/build_android.sh
