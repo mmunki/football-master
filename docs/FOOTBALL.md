@@ -53,9 +53,10 @@ stylized, not photoreal.
   checkpoint upload, continuation run, previous run cancelled.
 - Every release contains the game package, the Android APK, `SHA256SUMS`, and
   the source archive.
-- `tools/build_android.sh` exports an **arm64-v8a only** APK for
-  Android 7.0+ (minSdk 24), targets Android 16 (targetSdk 36), uses the
-  16 KB page-size layout and is release-signed with v1/v2/v3 signatures;
-  `.github/workflows/android.yml` builds and verifies it on each push.
+- `tools/build_android.sh` exports a **universal** APK (`arm64-v8a`,
+  `armeabi-v7a`, `x86_64`) for Android 7.0+ (minSdk 24), targets Android 16
+  (targetSdk 36), uses the 16 KB page-size layout and is release-signed with
+  v1/v2/v3 signatures; `.github/workflows/android.yml` builds and verifies it
+  on each push and installs it on an emulator before it can be published.
 - Touch input: the Android build shows a left thumb stick (full push sprints)
   and a KICK button; the desktop build keeps the keyboard controls.

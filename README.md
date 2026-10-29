@@ -44,9 +44,10 @@ bash tools/build_android.sh      # -> build/android/football-master.apk
 adb install -r build/android/football-master.apk
 ```
 
-The APK contains **only the `arm64-v8a` ABI** (no `armeabi-v7a`, `x86` or
-`x86_64` libraries), runs on **Android 7.0+** (minSdk 24) and targets
-**Android 16** (targetSdk 36). The native libraries and the APK use the
+The APK is **universal**: it contains the `arm64-v8a`, `armeabi-v7a` and
+`x86_64` libraries, so the same file installs on 64-bit phones, 32-bit phones
+and x86_64 tablets/emulators. It runs on **Android 7.0+** (minSdk 24) and
+targets **Android 16** (targetSdk 36). The native libraries and the APK use the
 **16 KB page-size** layout required by newer Android devices. The mobile
 renderer uses Vulkan on Android 7.0+ and falls back to OpenGL ES 3 on older
 devices. On a phone the left thumb stick moves the striker (push it all the
@@ -65,15 +66,35 @@ bash tools/build_android.sh
 
 `tools/build_android.sh` refuses to build a release without a keystore. It
 writes the public certificate to `build/android/football-master-certificate.pem`,
-checks that the only ABI is arm64-v8a, that minSdk/targetSdk are 24/36, that
-the APK is 16 KB aligned, and that the v1/v2/v3 signatures verify. Set
+checks that all three ABIs (`arm64-v8a`, `armeabi-v7a`, `x86_64`) are present
+and every one contains `libgodot_android.so`, that minSdk/targetSdk are 24/36,
+that the APK is 16 KB aligned, and that the v1/v2/v3 signatures verify. Set
 `ANDROID_EXPORT_MODE=debug` only for a throw-away test build.
 
 CI (`.github/workflows/android.yml`) rebuilds and verifies the APK on every
 relevant change. It reads the keystore from the repository secrets
 `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
 and `ANDROID_CERT_SHA256`, and keeps the APK, certificate and checksums as
-artifacts.
+artifacts. A second job (`install-test`) boots an x86_64 Android 14 emulator,
+installs the built APK, launches the game and fails the workflow if the game
+does not come up — so an APK that does not install can no longer be published.
+
+### "App not installed"
+
+Android refuses an update when the signing key differs. The 1.1.0 APK was
+debug-signed with Godot's throw-away key, so a phone that still has 1.1.0 must
+uninstall it once before installing any current build:
+
+```bash
+adb uninstall com.mmunki.footballmaster
+adb install -r football-master.apk
+```
+
+From 1.2.0 on, every release is signed with the same project keystore, so
+later versions update in place. Other reasons for "App not installed" are a
+device with no matching ABI (fixed by the universal APK), Android older than
+7.0 (minSdk 24), and a truncated download (check the SHA-256 from the release
+notes).
 
 ```bash
 .github/scripts/publish-release.sh \
