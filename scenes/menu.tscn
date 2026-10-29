@@ -41,7 +41,7 @@ theme_override_constants/separation = 6.0
 
 [node name="MoveLabel" type="Label" parent="VBox/Controls"]
 layout_mode = 2
-text = "Move: WASD / arrow keys    Sprint: Shift    Kick: Space"
+text = "Move: WASD / arrows / left stick    Sprint: Shift / full stick    Kick: Space / KICK"
 
 [node name="HintLabel" type="Label" parent="VBox/Controls"]
 layout_mode = 2

@@ -1,0 +1,78 @@
+name: android
+
+# Builds the installable Android APK on every change that can affect it.
+# The APK is a debug-signed, universal build (arm64-v8a, armeabi-v7a and
+# x86_64) and is kept as a workflow artifact.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "project.godot"
+      - "export_presets.cfg"
+      - "icon.svg"
+      - "scenes/**"
+      - "scripts/**"
+      - "tools/**"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "project.godot"
+      - "export_presets.cfg"
+      - "icon.svg"
+      - "scenes/**"
+      - "scripts/**"
+      - "tools/**"
+      - ".github/workflows/android.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the project
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The ubuntu runner image already ships the Android SDK with
+      # platform-tools and build-tools.  setup-android is not used because its
+      # post-install step still asks for the removed legacy "tools" package.
+      - name: Check the Android SDK
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_HOME:-}" ]; then
+            for candidate in "$HOME/Android/Sdk" /usr/local/lib/android/sdk /opt/android-sdk; do
+              if [ -d "$candidate/build-tools" ]; then
+                echo "ANDROID_HOME=$candidate" >> "$GITHUB_ENV"
+                break
+              fi
+            done
+          fi
+          [ -n "${ANDROID_HOME:-}" ] || { echo "::error::Android SDK not found"; exit 1; }
+          [ -d "$ANDROID_HOME/build-tools" ] || { echo "::error::Android build-tools are missing"; exit 1; }
+          echo "SDK: $ANDROID_HOME"
+          echo "build-tools: $(ls "$ANDROID_HOME/build-tools" | tr '\n' ' ')"
+
+      - name: Build the APK
+        run: bash tools/build_android.sh
+
+      - name: Keep the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: football-master-android-${{ github.run_id }}
+          path: |
+            build/android/football-master.apk
+            build/SHA256SUMS
+          retention-days: 14
+          if-no-files-found: error
